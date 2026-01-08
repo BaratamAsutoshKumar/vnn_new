@@ -92,18 +92,14 @@ class NCLTVNNDataset(Dataset):
 
     def __getitem__(self, idx):
         scan = np.fromfile(self.scans[idx], dtype=np.float32)
-        scan = scan.reshape(-1, 4)[:, :3]
-
-        if scan.shape[0] > self.num_points:
-            ids = np.random.choice(scan.shape[0], self.num_points, replace=False)
-            scan = scan[ids]
+        scan = scan.reshape(-1, 4)[:, :3]      # (N,3)
 
         R = self.rots[idx]
         t = self.trans[idx]
 
         scan_gt = (R @ scan.T).T + t
 
-        scan = torch.from_numpy(scan).float().T
+        scan = torch.from_numpy(scan).float().T      # (3,N)
         scan_gt = torch.from_numpy(scan_gt).float().T
 
         return scan, scan_gt

@@ -18,11 +18,11 @@ from utils.checkpoint import save_checkpoint, load_checkpoint
 # Config
 # =======================
 ROOT = "/DATA/common/NCLT"
-NUM_POINTS = 100000          # using all points (heavy!)
+NUM_POINTS = 130000          # using all points (heavy!)
 BATCH_SIZE = 1
 EPOCHS = 500
 LR = 1e-3
-NUM_WORKERS = 4
+NUM_WORKERS = 0
 VIS_EVERY = 10
 
 PATIENCE = 25
@@ -66,11 +66,11 @@ def run_epoch(model, loader, optimizer=None, scaler=None, epoch=0, split="train"
     )
 
     for it, (scan, scan_gt) in pbar:
-        scan = scan.to(DEVICE, non_blocking=True)
-        scan_gt = scan_gt.to(DEVICE, non_blocking=True)
+        scan = scan.unsqueeze(0).to(DEVICE) 
+        scan_gt = scan_gt.unsqueeze(0).to(DEVICE)
 
         # (B,3,N) -> (B,1,3,N)
-        scan_vnn = scan.unsqueeze(1)
+        scan_vnn = scan.unsqueeze(1) 
 
         with amp.autocast("cuda", enabled=is_train):
             pred = model(scan_vnn)     # (B,1,3,N)
@@ -93,7 +93,7 @@ def run_epoch(model, loader, optimizer=None, scaler=None, epoch=0, split="train"
         )
 
         # ---- optional per-step print (useful for nohup logs) ----
-        if it % 50 == 0:
+        if it % 1000 == 0:
             print(
                 f"[{split}] Epoch {epoch:03d} | "
                 f"Step {it:05d}/{len(loader)} | "
@@ -117,6 +117,11 @@ def run_epoch(model, loader, optimizer=None, scaler=None, epoch=0, split="train"
 # =======================
 # Main
 # =======================
+
+def collate_single(batch):
+    # batch is a list of length 1
+    return batch[0]
+
 def train():
     set_seed(42)
     os.makedirs(CKPT_DIR, exist_ok=True)
@@ -132,19 +137,21 @@ def train():
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=1,
         shuffle=True,
-        num_workers=NUM_WORKERS,
-        pin_memory=True,
-        drop_last=True
+        num_workers=0,          # IMPORTANT
+        collate_fn=collate_single,
+        pin_memory=False
     )
+
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=BATCH_SIZE,
+        batch_size=1,
         shuffle=False,
-        num_workers=NUM_WORKERS,
-        pin_memory=True
+        num_workers=0,
+        collate_fn=collate_single,
+        pin_memory=False
     )
 
     # -------- Model --------
