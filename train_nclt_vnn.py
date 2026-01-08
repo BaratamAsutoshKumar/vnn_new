@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch import amp
+from tqdm import tqdm
 
 from models.vn_pointnet_regression import VNPointNetRegressor
 from data_utils.nclt_vnn_dataset import NCLTVNNDataset
@@ -17,8 +18,8 @@ from utils.checkpoint import save_checkpoint, load_checkpoint
 # Config
 # =======================
 ROOT = "/DATA/common/NCLT"
-NUM_POINTS = 2048
-BATCH_SIZE = 4
+NUM_POINTS = 100000          # using all points (heavy!)
+BATCH_SIZE = 1
 EPOCHS = 500
 LR = 1e-3
 NUM_WORKERS = 4
@@ -56,9 +57,17 @@ def run_epoch(model, loader, optimizer=None, scaler=None, epoch=0, split="train"
 
     total_loss = 0.0
 
-    for it, (scan, scan_gt) in enumerate(loader):
-        scan = scan.to(DEVICE)
-        scan_gt = scan_gt.to(DEVICE)
+    # tqdm over batches
+    pbar = tqdm(
+        enumerate(loader),
+        total=len(loader),
+        desc=f"{split.upper()} Epoch {epoch}",
+        leave=False
+    )
+
+    for it, (scan, scan_gt) in pbar:
+        scan = scan.to(DEVICE, non_blocking=True)
+        scan_gt = scan_gt.to(DEVICE, non_blocking=True)
 
         # (B,3,N) -> (B,1,3,N)
         scan_vnn = scan.unsqueeze(1)
@@ -74,9 +83,25 @@ def run_epoch(model, loader, optimizer=None, scaler=None, epoch=0, split="train"
             scaler.step(optimizer)
             scaler.update()
 
-        total_loss += loss.item()
+        loss_val = loss.item()
+        total_loss += loss_val
 
-        # overwrite visualization
+        # ---- tqdm live update ----
+        pbar.set_postfix(
+            loss=f"{loss_val:.6f}",
+            avg=f"{total_loss / (it + 1):.6f}"
+        )
+
+        # ---- optional per-step print (useful for nohup logs) ----
+        if it % 50 == 0:
+            print(
+                f"[{split}] Epoch {epoch:03d} | "
+                f"Step {it:05d}/{len(loader)} | "
+                f"Loss {loss_val:.6f}",
+                flush=True
+            )
+
+        # ---- visualization (overwrite) ----
         if split == "train" and it == 0 and epoch % VIS_EVERY == 0:
             visualize_and_save(
                 scan[0],
@@ -103,7 +128,7 @@ def train():
 
     use_val = len(val_dataset) > 0
     if not use_val:
-        print("[WARN] Validation dataset empty. Skipping validation.")
+        print("[WARN] Validation dataset empty. Skipping validation.", flush=True)
 
     train_loader = DataLoader(
         train_dataset,
@@ -135,14 +160,20 @@ def train():
 
     # -------- Resume --------
     if RESUME and os.path.exists(RESUME_PATH):
-        print(f"Resuming from {RESUME_PATH}")
+        print(f"Resuming from {RESUME_PATH}", flush=True)
         start_epoch, train_losses, val_losses, best_val, epochs_since_improve = load_checkpoint(
             RESUME_PATH, model, optimizer, scaler
         )
         start_epoch += 1
 
-    # -------- Training loop --------
-    for epoch in range(start_epoch, EPOCHS):
+    # -------- Epoch loop --------
+    epoch_pbar = tqdm(
+        range(start_epoch, EPOCHS),
+        desc="TRAINING",
+        position=0
+    )
+
+    for epoch in epoch_pbar:
         train_loss = run_epoch(
             model, train_loader, optimizer, scaler, epoch, split="train"
         )
@@ -157,19 +188,26 @@ def train():
         train_losses.append(train_loss)
         val_losses.append(val_loss)
 
+        # ---- epoch summary ----
         print(
-            f"Epoch {epoch:03d} | "
+            f"\nEpoch {epoch:03d} | "
             f"Train L1: {train_loss:.6f} | "
-            f"Val L1: {val_loss:.6f}"
+            f"Val L1: {val_loss:.6f}",
+            flush=True
         )
 
-        # -------- Loss curve (overwrite) --------
+        epoch_pbar.set_postfix(
+            train=f"{train_loss:.6f}",
+            val=f"{val_loss:.6f}"
+        )
+
+        # ---- loss curve (overwrite) ----
         if use_val:
             plot_loss(train_losses, val_losses, LOSS_PLOT_PATH)
         else:
             plot_loss(train_losses, train_losses, LOSS_PLOT_PATH)
 
-        # -------- Early stopping --------
+        # ---- early stopping ----
         if best_val - val_loss > MIN_DELTA:
             best_val = val_loss
             epochs_since_improve = 0
@@ -177,9 +215,12 @@ def train():
         else:
             epochs_since_improve += 1
 
-        print(f"EarlyStop counter: {epochs_since_improve}/{PATIENCE}")
+        print(
+            f"EarlyStop counter: {epochs_since_improve}/{PATIENCE}",
+            flush=True
+        )
 
-        # -------- Always save last --------
+        # ---- save last ----
         save_checkpoint(
             os.path.join(CKPT_DIR, "last.pth"),
             model,
@@ -192,16 +233,15 @@ def train():
             epochs_since_improve
         )
 
-        # -------- Periodic snapshot --------
+        # ---- periodic snapshot ----
         if epoch % VIS_EVERY == 0:
             torch.save(
                 model.state_dict(),
                 os.path.join(CKPT_DIR, f"epoch_{epoch:03d}.pth")
             )
 
-        # -------- Stop --------
         if epochs_since_improve >= PATIENCE:
-            print("Early stopping triggered.")
+            print("Early stopping triggered.", flush=True)
             break
 
 
