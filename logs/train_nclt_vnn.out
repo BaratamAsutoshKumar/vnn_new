@@ -1,0 +1,12 @@
+nohup: ignoring input
+[WARN] Split 'train' is empty or missing.
+[INFO] Falling back to all available sequences.
+[INFO] Loading NCLT split='train'
+[INFO] Using 6 sequences
+[INFO] Loaded 88000 samples from 6 sequences
+[INFO] Loading NCLT split='valid'
+[INFO] Using 1 sequences
+[WARN] Missing /DATA/common/NCLT/2012-03-31/velodyne_left_False.h5, skipping sequence 2012-03-31
+[ERROR] No valid NCLT scans found!
+[ERROR] Check dataset path and h5 files.
+[WARN] Validation dataset empty. Skipping validation.
